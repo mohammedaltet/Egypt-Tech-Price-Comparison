@@ -55,12 +55,6 @@ Search for `RTX 4070`
 
 ---
 
-## 📷 Screenshots
-
-> *(You can embed screenshots or a demo GIF here)*
-
----
-
 ## 🛠️ Why I Built This
 
 As someone who frequently buys PC components, I got tired of opening 10+ tabs just to check prices.
