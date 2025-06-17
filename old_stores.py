@@ -377,49 +377,272 @@ def scrape_deltacomputer(query):
         return []
 
 #✅ 6. elnour-tech (FIXED)
-def scrape_elnourtech(query):
-    def extract_price_from_html(html_text):
-        soup = BeautifulSoup(html_text, "html.parser")
-        price_tag = soup.select_one("ins") or soup.select_one("span.amount") or soup
-        if price_tag:
-            # Use the European format handler for ElnourTech
-            return extract_price_european_format(price_tag.get_text())
+def extract_price_european_format(price_text):
+    """
+    Extract price from European format text (e.g., "1.234,56 €" or "1,234.56")
+    """
+    if not price_text:
+        return None
+    
+    # Remove currency symbols and extra whitespace
+    price_clean = re.sub(r'[^\d,.\s]', '', price_text.strip())
+    
+    # Handle different formats
+    if ',' in price_clean and '.' in price_clean:
+        # Format like "1,234.56" or "1.234,56"
+        if price_clean.rfind(',') > price_clean.rfind('.'):
+            # European format: "1.234,56"
+            price_clean = price_clean.replace('.', '').replace(',', '.')
+        else:
+            # US format: "1,234.56"
+            price_clean = price_clean.replace(',', '')
+    elif ',' in price_clean:
+        # Could be thousands separator or decimal
+        parts = price_clean.split(',')
+        if len(parts) == 2 and len(parts[1]) <= 2:
+            # Decimal separator: "1234,56"
+            price_clean = price_clean.replace(',', '.')
+        else:
+            # Thousands separator: "1,234"
+            price_clean = price_clean.replace(',', '')
+    
+    try:
+        return round(float(price_clean))
+    except ValueError:
         return None
 
-    url = f"https://elnour-tech.com/wp-admin/admin-ajax.php?action=woodmart_ajax_search&number=20&post_type=product&query={query}"
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json"
-    }
-
+def get_stock_status_elnourtech(product_url):
+    """
+    Fetch the actual stock status from ElnourTech product page
+    """
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     try:
-        r = requests.get(url, headers=headers, timeout=10)
-        results = []
+        response = requests.get(product_url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, "html.parser")
+            
+            # Check for out of stock indicators
+            out_of_stock_selectors = [
+                ".out-of-stock",
+                ".stock.out-of-stock",
+                "*:contains('Out of stock')",
+                "*:contains('نفدت الكمية')",
+                "button:disabled",
+                ".single_add_to_cart_button:disabled"
+            ]
+            
+            for selector in out_of_stock_selectors:
+                element = soup.select_one(selector)
+                if element:
+                    return "Out of Stock"
+            
+            # Check if add to cart button is available
+            add_to_cart = soup.select_one(".single_add_to_cart_button, .add_to_cart_button")
+            if add_to_cart and "disabled" in add_to_cart.get("class", []):
+                return "Out of Stock"
+            
+            return "In Stock"
+                    
+    except Exception as e:
+        print(f"Error fetching stock status from ElnourTech: {e}")
+        return "Check site"
 
-        if r.status_code == 200:
+def scrape_elnourtech(query):
+    """
+    Scrape ElnourTech using their AJAX search endpoint
+    """
+    def extract_price_from_html(html_text):
+        if not html_text:
+            return None
+        
+        soup = BeautifulSoup(html_text, "html.parser")
+        
+        # Try different price selectors
+        price_selectors = [
+            "ins .amount",
+            "ins",
+            ".amount",
+            ".price .woocommerce-Price-amount",
+            ".woocommerce-Price-amount",
+            "span[class*='amount']"
+        ]
+        
+        price_element = None
+        for selector in price_selectors:
+            price_element = soup.select_one(selector)
+            if price_element:
+                break
+        
+        if not price_element:
+            # Fallback: try to find any element with price-like text
+            price_element = soup
+        
+        if price_element:
+            return extract_price_european_format(price_element.get_text())
+        return None
+
+    # Primary AJAX endpoint
+    primary_url = f"https://elnour-tech.com/wp-admin/admin-ajax.php"
+    
+    # Fallback search URLs to try
+    fallback_urls = [
+        f"https://elnour-tech.com/?s={query.replace(' ', '+')}&post_type=product",
+        f"https://elnour-tech.com/shop/?s={query.replace(' ', '+')}"
+    ]
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json, text/html, */*",
+        "Referer": "https://elnour-tech.com/",
+        "X-Requested-With": "XMLHttpRequest"
+    }
+    
+    results = []
+    
+    # Try AJAX search first
+    try:
+        ajax_params = {
+            "action": "woodmart_ajax_search",
+            "number": 20,
+            "post_type": "product",
+            "query": query
+        }
+        
+        print(f"Trying AJAX search for: {query}")
+        response = requests.get(primary_url, params=ajax_params, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
             try:
-                data = r.json()
-                for item in data.get("suggestions", []):
-                    name = item.get("value")
-                    link = item.get("permalink")
-                    price_html = item.get("price")
-                    price = extract_price_from_html(price_html) if price_html else None
-
-                    if name and link and price and price > 1:  # Filter out 1 EGP prices
+                data = response.json()
+                suggestions = data.get("suggestions", [])
+                
+                print(f"Found {len(suggestions)} suggestions from AJAX")
+                
+                for item in suggestions:
+                    try:
+                        name = item.get("value", "").strip()
+                        link = item.get("permalink", "")
+                        price_html = item.get("price", "")
+                        
+                        if not name or not link:
+                            continue
+                        
+                        # Extract price
+                        price = extract_price_from_html(price_html) if price_html else None
+                        
+                        # Skip items without valid price
+                        if not price or price <= 0:
+                            continue
+                        
+                        # Get stock status
+                        stock_status = get_stock_status_elnourtech(link)
+                        
                         results.append({
-                            "name": name.strip(),
+                            "name": name,
                             "url": link,
                             "price": price,
                             "store": "ElnourTech",
-                            "availability": "In Stock"
+                            "availability": stock_status
                         })
+                        
+                        print(f"✅ Added: {name} - {price} EGP - {stock_status}")
+                        
+                    except Exception as e:
+                        print(f"❌ Error parsing ElnourTech item: {e}")
+                        continue
+                
+                if results:
+                    return results
+                    
+            except json.JSONDecodeError as e:
+                print(f"❌ JSON decode error: {e}")
+                print(f"Response content: {response.text[:200]}...")
             except Exception as e:
-                print("❌ Error parsing JSON from ElnourTech:", e)
+                print(f"❌ Error parsing AJAX response: {e}")
+    
+    except requests.RequestException as e:
+        print(f"❌ AJAX request failed: {e}")
+    
+    # Fallback to regular search if AJAX fails
+    print("AJAX search failed, trying fallback methods...")
+    
+    for fallback_url in fallback_urls:
+        try:
+            print(f"Trying fallback URL: {fallback_url}")
+            response = requests.get(fallback_url, headers=headers, timeout=15)
+            
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Try different product selectors
+                product_selectors = [
+                    ".product",
+                    ".woocommerce-product",
+                    ".product-item",
+                    ".shop-item",
+                    "li[class*='product']"
+                ]
+                
+                products = []
+                for selector in product_selectors:
+                    products = soup.select(selector)
+                    if products:
+                        print(f"Found {len(products)} products with selector: {selector}")
+                        break
+                
+                for product in products[:10]:  # Limit to first 10 products
+                    try:
+                        # Get product name and link
+                        link_element = product.select_one("a[href*='/product/'], .woocommerce-loop-product__link, h2 a")
+                        if not link_element:
+                            continue
+                        
+                        name = link_element.get("title") or link_element.get_text().strip()
+                        link = link_element.get("href")
+                        
+                        if not name or not link:
+                            continue
+                        
+                        # Make sure link is absolute
+                        if link.startswith('/'):
+                            link = "https://elnour-tech.com" + link
+                        
+                        # Get price
+                        price_element = product.select_one(".price .amount, .woocommerce-Price-amount, .price")
+                        if not price_element:
+                            continue
+                        
+                        price = extract_price_european_format(price_element.get_text())
+                        if not price or price <= 0:
+                            continue
+                        
+                        # Get stock status
+                        stock_status = get_stock_status_elnourtech(link)
+                        
+                        results.append({
+                            "name": name,
+                            "url": link,
+                            "price": price,
+                            "store": "ElnourTech",
+                            "availability": stock_status
+                        })
+                        
+                        print(f"✅ Added from fallback: {name} - {price} EGP")
+                        
+                    except Exception as e:
+                        print(f"❌ Error parsing fallback product: {e}")
+                        continue
+                
+                if results:
+                    return results
+                    
+        except requests.RequestException as e:
+            print(f"❌ Fallback request failed for {fallback_url}: {e}")
+            continue
+    
+    print("❌ All search methods failed")
+    return results
 
-        return results
-    except Exception as e:
-        st.error(f"Error scraping ElnourTech: {e}")
-        return []
         
 #✅ 7. solidhardware
 def scrape_solidhardware(query):
@@ -957,11 +1180,14 @@ def scrape_abcshop(query):
         return []
         
 # ✅ 13. compumarts
+import requests
+from bs4 import BeautifulSoup
+
 def get_stock_status_compumarts(product_url):
     """
     Fetch the actual stock status from the CompuMarts product page
     """
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     try:
         response = requests.get(product_url, headers=headers, timeout=10)
         if response.status_code == 200:
@@ -977,6 +1203,16 @@ def get_stock_status_compumarts(product_url):
             if sold_out_text:
                 return "Out of Stock"
             
+            # Check for "Unavailable" text which is common on CompuMarts
+            unavailable_elements = soup.select("*:contains('Unavailable')")
+            if unavailable_elements:
+                return "Out of Stock"
+            
+            # Check for stock status in button text
+            add_to_cart_button = soup.select_one("button[type='submit'], .btn-product-form")
+            if add_to_cart_button and "sold out" in add_to_cart_button.get_text().lower():
+                return "Out of Stock"
+            
             # If no sold out indicator found, assume it's in stock
             return "In Stock"
                     
@@ -986,42 +1222,134 @@ def get_stock_status_compumarts(product_url):
 
 def scrape_compumarts(query):
     base_url = "https://www.compumarts.com"
-    search_url = f"{base_url}/ar/search?options%5Bprefix%5D=last&q={query.replace(' ', '+')}"
+    
+    # Try different possible search URL formats
+    possible_urls = [
+        f"{base_url}/search?q={query.replace(' ', '+')}",
+        f"{base_url}/search?query={query.replace(' ', '+')}",
+        f"{base_url}/collections/all?filter.v.availability=1&sort_by=best-selling&q={query.replace(' ', '+')}",
+        f"{base_url}/ar/search?options%5Bprefix%5D=last&q={query.replace(' ', '+')}"
+    ]
     
     headers = {
-        "User-Agent": "Mozilla/5.0"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
 
-    response = requests.get(search_url, headers=headers)
-    soup = BeautifulSoup(response.text, 'html.parser')
+    # Try different URL formats until one works
+    soup = None
+    working_url = None
+    
+    for url in possible_urls:
+        try:
+            response = requests.get(url, headers=headers, timeout=15)
+            
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                working_url = url
+                break
+                
+        except requests.RequestException:
+            continue
+    
+    if not soup:
+        print("❌ All URL formats failed")
+        return []
+
+    # Try different selectors for product cards
+    selectors_to_try = [
+        "li.js-pagination-result",
+        ".product-item",
+        ".card",
+        ".product-card",
+        "article.product",
+        ".grid-item",
+        "[data-product-id]"
+    ]
+    
+    product_cards = []
+    for selector in selectors_to_try:
+        product_cards = soup.select(selector)
+        if product_cards:
+            break
+    
+    if not product_cards:
+        return []
 
     results = []
-    product_cards = soup.select("li.js-pagination-result")
-
     for card in product_cards:
         try:
-            name_element = card.select_one("p.card__title a")
+            # Try different selectors for product name
+            name_selectors = [
+                "p.card__title a",
+                ".product-title a",
+                ".card-title a",
+                "h3 a",
+                "h2 a",
+                ".product-name a",
+                "a[href*='/products/']"
+            ]
+            
+            name_element = None
+            for selector in name_selectors:
+                name_element = card.select_one(selector)
+                if name_element:
+                    break
+            
             if not name_element:
                 continue
                 
             name = name_element.text.strip()
-            relative_url = name_element["href"]
+            relative_url = name_element.get("href")
+            if not relative_url:
+                continue
+                
             url = base_url + relative_url
 
-            price_element = card.select_one("span.price__current span.js-value")
+            # Try different selectors for price
+            price_selectors = [
+                "span.price__current span.js-value",
+                ".price .current",
+                ".price-current",
+                ".price",
+                "[class*='price']",
+                ".money"
+            ]
+            
+            price_element = None
+            for selector in price_selectors:
+                price_element = card.select_one(selector)
+                if price_element:
+                    break
+            
             if not price_element:
                 continue
                 
             price_text = price_element.text.strip()
             price_clean = price_text.replace(",", "").replace("EGP", "").strip()
-            price_val = round(float(price_clean))
+            
+            try:
+                price_val = round(float(price_clean))
+            except ValueError:
+                continue
 
             # Check stock status directly from the search results page first
-            sold_out_label = card.select_one("span.product-label--sold-out")
-            if sold_out_label:
-                stock_status = "Out of Stock"
-            else:
-                # If not found in search results, check the product page
+            sold_out_selectors = [
+                "span.product-label--sold-out",
+                ".sold-out",
+                ".out-of-stock",
+                "*:contains('Sold out')",
+                "*:contains('Unavailable')"
+            ]
+            
+            stock_status = "In Stock"  # Default assumption
+            for selector in sold_out_selectors:
+                sold_out_label = card.select_one(selector)
+                if sold_out_label:
+                    stock_status = "Out of Stock"
+                    break
+            
+            # If not found as sold out in search results, check the product page
+            if stock_status == "In Stock":
                 stock_status = get_stock_status_compumarts(url)
 
             results.append({
