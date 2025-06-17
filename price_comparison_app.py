@@ -16,13 +16,8 @@ import cachetools
 from typing import List, Dict, Any
 
 from functools import wraps
-from old_stores import (
-    scrape_sigma, scrape_elnekhely, scrape_elbadrgroupe, scrape_barakacomputer,
-    scrape_deltacomputer, scrape_elnourtech, scrape_solidhardware, scrape_alfrensia,
-    scrape_ahwstore, scrape_kimostore, scrape_uptodate, scrape_abcshop,
-    scrape_compumarts, scrape_compunilestore, scrape_compuscience,
-    scrape_maximumhardware, scrape_quantumtechnology, scrape_highendstore
-)
+from old_stores import *
+
 
 # Configure Streamlit page
 st.set_page_config(
