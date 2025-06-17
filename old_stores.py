@@ -184,13 +184,44 @@ def extract_price(price_str):
     return int("".join(numbers)) if numbers else None
 
 #✅ 3. elbadrgroupeg
+WORKING_HEADERS = {
+    'accept': 'application/json, text/javascript, */*; q=0.01',
+    'accept-language': 'en-US,en;q=0.9',
+    'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+    'origin': 'https://elbadrgroupeg.store',
+    'referer': 'https://elbadrgroupeg.store/',
+    'sec-ch-ua': '"Google Chrome";v="137", "Chromium";v="137", "Not/A)Brand";v="24"',
+    'sec-ch-ua-arch': '"x86"',
+    'sec-ch-ua-bitness': '"64"',
+    'sec-ch-ua-full-version': '"137.0.7151.104"',
+    'sec-ch-ua-full-version-list': '"Google Chrome";v="137.0.7151.104", "Chromium";v="137.0.7151.104", "Not/A)Brand";v="24.0.0.0"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-model': '""',
+    'sec-ch-ua-platform': '"Windows"',
+    'sec-ch-ua-platform-version': '"10.0.0"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-origin',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
+    'x-requested-with': 'XMLHttpRequest'
+}
+
+WORKING_COOKIES = {
+    'language': 'en-gb',
+    'currency': 'EGP',
+    'OCSESSID': '3bbac5c84ef6b30e244ba01faf',
+    'cf_clearance': 'gNogXtUzKZijvZenW9dszYepfP2htaetRG30hcf6q8A-1750122467-1.2.1.1-NqJmn4x8w1e1GrZ.q0fSivqtra1czLpPHRS2hIw6cyTWkO0Mt7BNmPQdgYT05znLkMWMTzXuSlCUVSB1RYaMX_IG9yDaeyvWAKbRGqPf7FFG4EFglGLY9m0JKOB3.V64NsmV0w3BVKYlLG6YxgkuD6NwC9hQzDcwysqRa2cSjBuzf.UzyyngCq_LGAn_kJL.s9BOJf0MLZ_YzwN6GawdkW5CraJpE0QBHSzmLI2gvxYTtU29J1rpUM7AxQkTae3BJngmSMYqbKp06lQKdN.qncbeC0wb4M50wUrUoSRwQE1_v8uM3IVWarEKomuc9qejaqW_QNcmdbWU6tLjYjuueRqLNivFAyauy3i36wrfF6hEUV_mOgasnIL9J0PchHXA',
+    'jrv': '6599',
+    '_fbp': 'fb.1.1750122471066.824500933275114599'
+}
+
+
 def get_stock_status_elbadrgroup(product_url):
     """
     Fetch the actual stock status from the ElBadrGroup product page
     """
-    headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        response = requests.get(product_url, headers=headers, timeout=10)
+        response = requests.get(product_url, headers=WORKING_HEADERS, cookies=WORKING_COOKIES, timeout=10)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, "html.parser")
             
@@ -223,17 +254,13 @@ def get_stock_status_elbadrgroup(product_url):
         print(f"Error fetching stock status from ElBadrGroup: {e}")
         return "Check site"
 
+
 def scrape_elbadrgroupe(query):
     url = f"https://elbadrgroupeg.store/index.php?route=journal3/search&search={query}"
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json"
-    }
-
+    
     try:
-        r = requests.get(url, headers=headers, timeout=10)
+        r = requests.get(url, headers=WORKING_HEADERS, cookies=WORKING_COOKIES, timeout=10)
         results = []
-
         if r.status_code == 200:
             try:
                 data = r.json()
@@ -257,17 +284,11 @@ def scrape_elbadrgroupe(query):
                                 })
             except Exception as e:
                 print("❌ Error parsing JSON from ElBadrGroup:", e)
-
         return results
     except Exception as e:
         st.error(f"Error scraping ElBadrGroup: {e}")
         return []
-
-def extract_price(price_str):
-    """Helper function to extract price from string"""
-    numbers = re.findall(r'\d+', price_str.replace(",", ""))
-    return int("".join(numbers)) if numbers else None
-
+        
 #✅ 4. barakacomputer
 def scrape_barakacomputer(query):
     def extract_price_from_html(html_text):
