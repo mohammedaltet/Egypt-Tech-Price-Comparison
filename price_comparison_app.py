@@ -18,7 +18,6 @@ from typing import List, Dict, Any
 from functools import wraps
 from old_stores import *
 
-
 # Configure Streamlit page
 st.set_page_config(
     page_title="Egypt Tech Price Comparison",
